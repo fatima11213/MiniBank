@@ -439,6 +439,326 @@ def get_scheduled_transactions():
 
 
 
+#Payment
+#gas bill
+@app.route("/gas_bill", methods=["GET", "POST"])
+def gas_bill():
+    user_id = get_user_id_from_cookie()
+    if not user_id:
+        return redirect("/login")
+
+    if request.method == "GET":
+        return render_template("gas_bill.html")
+
+    name = request.form.get("userName")
+    meter_no = request.form.get("meterNo")
+    amount = float(request.form.get("amount"))
+    month = request.form.get("month")
+
+    installment_option = request.form.get("installmentMonths")
+    is_installment = request.form.get("installmentOption") == "on"
+   
+    with db.cursor() as cursor:
+        cursor.execute("SELECT balance, transaction_limit FROM user_profile WHERE user_id = %s", (user_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return redirect("/login")
+
+        balance = float(user['balance'])
+        trx_limit = int(user['transaction_limit'])
+
+        # INSTALLMENT
+        if is_installment and installment_option:
+            months = int(installment_option)
+            part1 = round(amount / months, 2)
+
+            if balance < part1:
+                return render_template("gas_bill.html", popup="insufficient")
+            if part1 > trx_limit:
+                return render_template("gas_bill.html", popup="limit")
+
+            cursor.execute("UPDATE user_profile SET balance = balance - %s WHERE user_id = %s", (part1, user_id))
+
+            due_1_date = (datetime.now() + timedelta(days=30)).date()
+            due_2_date = (datetime.now() + timedelta(days=60)).date() if months == 3 else None
+
+            cursor.execute("""
+                INSERT INTO pay_gas
+                (user_id, name, meter_no, amount, month, installment, due_1, due_2, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+            """, (
+                user_id, name, meter_no, amount, month, months, due_1_date, due_2_date
+            ))
+
+            
+
+            alert = f"Bill payment for Gas ID {meter_no} of {amount} Taka Successful!"
+            cursor.execute("INSERT INTO notifications (user_id, alerts) VALUES (%s, %s)", (user_id, alert))
+
+            cursor.execute("""
+                INSERT INTO history (user_id, type, trx_id, account, amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "Gas Bill Payment in Installment", "N/A", meter_no, -amount))
+
+            db.commit()
+            return render_template("gas_bill.html", popup="success")
+        
+        else:
+            if balance < amount:
+                return render_template("gas_bill.html", popup="insufficient")
+            if amount > trx_limit:
+                return render_template("gas_bill.html", popup="limit")
+
+            cursor.execute("UPDATE user_profile SET balance = balance - %s WHERE user_id = %s", (amount, user_id))
+
+            cursor.execute("""
+                INSERT INTO pay_gas (user_id, name, meter_no, amount, month)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, name, meter_no, amount, month))
+
+            cursor.execute("UPDATE user_profile SET points = points + %s WHERE user_id = %s", (int(amount // 100), user_id))
+
+            alert = f"Bill payment for Gas ID {meter_no} of {amount} Taka Successful!"
+            cursor.execute("INSERT INTO notifications (user_id, alerts) VALUES (%s, %s)", (user_id, alert))
+
+            cursor.execute("""
+                INSERT INTO history (user_id, type, trx_id, account, amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "Gas Bill Payment", "N/A", meter_no, -amount))
+#wifi bill
+@app.route("/wifi_bill", methods=["GET", "POST"])
+def wifi_bill():
+    user_id = get_user_id_from_cookie()
+    if not user_id:
+        return redirect("/login")
+
+    if request.method == "GET":
+        return render_template("wifi_bill.html")
+
+    name = request.form.get("userName")
+    wifi_id = request.form.get("meterNo")
+    amount = float(request.form.get("amount"))
+    month = request.form.get("month")
+
+    installment_option = request.form.get("installmentMonths")
+    is_installment = request.form.get("installmentOption") == "on"
+    
+
+    with db.cursor() as cursor:
+        cursor.execute("SELECT balance, transaction_limit FROM user_profile WHERE user_id = %s", (user_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return redirect("/login")
+
+        balance = float(user['balance'])
+        trx_limit = int(user['transaction_limit'])
+
+        # INSTALLMENT
+        if is_installment and installment_option:
+            months = int(installment_option)
+            part1 = round(amount / months, 2)
+
+            if balance < part1:
+                return render_template("wifi_bill.html", popup="insufficient")
+            if part1 > trx_limit:
+                return render_template("wifi_bill.html", popup="limit")
+
+            cursor.execute("UPDATE user_profile SET balance = balance - %s WHERE user_id = %s", (part1, user_id))
+
+            due_1_date = (datetime.now() + timedelta(days=30)).date()
+            due_2_date = (datetime.now() + timedelta(days=60)).date() if months == 3 else None
+
+            cursor.execute("""
+                INSERT INTO pay_wifi
+                (user_id, name, wifi_id, amount, month, installment, due_1, due_2, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+            """, (user_id, name, wifi_id, amount, month, months, due_1_date, due_2_date))
+
+            cursor.execute("UPDATE user_profile SET points = points + %s WHERE user_id = %s", (int(amount // 100), user_id))
+            alert = f"Bill payment for WiFi ID {wifi_id} of {amount} Taka Successful!"
+            cursor.execute("INSERT INTO notifications (user_id, alerts) VALUES (%s, %s)", (user_id, alert))
+            cursor.execute("""
+                INSERT INTO history (user_id, type, trx_id, account, amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "WiFi Bill Payment in Installment", "N/A", wifi_id, -amount))
+
+            db.commit()
+            return render_template("wifi_bill.html", popup="success")
+        
+        else:
+            if balance < amount:
+                return render_template("wifi_bill.html", popup="insufficient")
+            if amount > trx_limit:
+                return render_template("wifi_bill.html", popup="limit")
+
+            cursor.execute("UPDATE user_profile SET balance = balance - %s WHERE user_id = %s", (amount, user_id))
+            cursor.execute("""
+                INSERT INTO pay_wifi (user_id, name, wifi_id, amount, month)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, name, wifi_id, amount, month))
+            cursor.execute("UPDATE user_profile SET points = points + %s WHERE user_id = %s", (int(amount // 100), user_id))
+            alert = f"Bill payment for WiFi ID {wifi_id} of {amount} Taka Successful!"
+            cursor.execute("INSERT INTO notifications (user_id, alerts) VALUES (%s, %s)", (user_id, alert))
+            cursor.execute("""
+                INSERT INTO history (user_id, type, trx_id, account, amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "WiFi Bill Payment", "N/A", wifi_id, -amount))
+    
+
+#electricity bill
+@app.route("/electricity_bill", methods=["GET", "POST"])
+def electricity_bill():
+    user_id = get_user_id_from_cookie()
+    if not user_id:
+        return redirect("/login")
+
+    if request.method == "GET":
+        return render_template("electricity_bill.html")
+
+    name = request.form.get("userName")
+    meter_no = request.form.get("meterNo")
+    amount = float(request.form.get("amount"))
+    month = request.form.get("month")
+
+    installment_option = request.form.get("installmentMonths")
+    is_installment = request.form.get("installmentOption") == "on"
+
+    with db.cursor() as cursor:
+        cursor.execute("SELECT balance, transaction_limit FROM user_profile WHERE user_id = %s", (user_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return redirect("/login")
+
+        balance = float(user['balance'])
+        trx_limit = int(user['transaction_limit'])
+
+        # INSTALLMENT MODE
+        if is_installment and installment_option:
+            months = int(installment_option)
+            part1 = round(amount / months, 2)
+
+            if balance < part1:
+                return render_template("electricity_bill.html", popup="insufficient")
+            if part1 > trx_limit:
+                return render_template("electricity_bill.html", popup="limit")
+
+            cursor.execute("UPDATE user_profile SET balance = balance - %s WHERE user_id = %s", (part1, user_id))
+
+            due_1_date = (datetime.now() + timedelta(days=30)).date()
+            due_2_date = (datetime.now() + timedelta(days=60)).date() if months == 3 else None
+
+            cursor.execute("""
+                INSERT INTO pay_electricity
+                (user_id, name, meter_no, amount, month, installment, due_1, due_2, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+            """, (
+                user_id, name, meter_no, amount, month, months, due_1_date, due_2_date
+            ))
+
+            #Notification
+            alert = f"Bill payment for Meter ID {meter_no} of {amount} Taka Successful!"
+            cursor.execute("INSERT INTO notifications (user_id, alerts) VALUES (%s, %s)", (user_id, alert))
+            cursor.execute("""
+                INSERT INTO history (user_id, type, trx_id, account, amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "Electricity Bill Payment in Installment", "N/A", meter_no, -amount))
+
+            db.commit()
+            return render_template("electricity_bill.html", popup="success")
+        
+        else:
+            if balance < amount:
+                return render_template("electricity_bill.html", popup="insufficient")
+            if amount > trx_limit:
+                return render_template("electricity_bill.html", popup="limit")
+
+            cursor.execute("UPDATE user_profile SET balance = balance - %s WHERE user_id = %s", (amount, user_id))
+            cursor.execute("""
+                INSERT INTO pay_electricity (user_id, name, meter_no, amount, month)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, name, meter_no, amount, month))
+           
+            #Notification
+            alert = f"Bill payment for Electricity Meter {meter_no} of {amount} Taka Successful!"
+            cursor.execute("INSERT INTO notifications (user_id, alerts) VALUES (%s, %s)", (user_id, alert))
+            cursor.execute("""
+                INSERT INTO history (user_id, type, trx_id, account, amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "Electricity Bill Payment", "N/A", meter_no, -amount))
+
+
+#Pending Installment
+from dateutil.relativedelta import relativedelta
+@app.route("/pending_installments")
+def pending_installments():
+    user_id = get_user_id_from_cookie()
+    if not user_id:
+        return redirect("/login")
+
+    all_installments = []
+
+    def fetch_due(cursor, table, id_field, label):
+        cursor.execute(f"""
+            SELECT amount, installment, due_1, due_2 FROM {table}
+            WHERE user_id = %s AND status = 'pending'
+        """, (user_id,))
+        rows = cursor.fetchall()
+
+        for row in rows:
+            amt_per = round(row['amount'] / row['installment'], 2)
+
+            if row['due_1']:
+                due1 = row['due_1']
+                issue1 = due1 - relativedelta(months=1)
+                all_installments.append({
+                    "service": label,
+                    "amount": amt_per,
+                    "issue_date": issue1.strftime("%d/%m/%y"),
+                    "due_date": due1.strftime("%d/%m/%y")
+                })
+
+            if row['due_2']:
+                due2 = row['due_2']
+                issue2 = due2 - relativedelta(months=2)
+                all_installments.append({
+                    "service": label,
+                    "amount": amt_per,
+                    "issue_date": issue2.strftime("%d/%m/%y"),
+                    "due_date": due2.strftime("%d/%m/%y")
+                })
+
+    with db.cursor() as cursor:
+        fetch_due(cursor, "pay_electricity", "meter_no", "Electricity Bill Payment")
+        fetch_due(cursor, "pay_gas", "meter_no", "Gas Bill Payment")
+        fetch_due(cursor, "pay_wifi", "wifi_id", "WiFi Bill Payment")
+
+    return render_template("pending_installments.html", installments=all_installments)
+
+#Notifications
+@app.route('/notifications')
+def notifications():
+    user_id = request.cookies.get('user_id')
+    if not user_id:
+        return redirect('/login')
+    with db.cursor() as cursor:
+        cursor.execute("SELECT alerts, timestamp FROM notifications WHERE user_id = %s ORDER BY timestamp DESC", (user_id,))
+        notifications = cursor.fetchall()
+    return render_template('notifications.html', notifications=notifications)
+
+@app.route('/clear_notifications', methods=['POST'])
+def clear_notifications():
+    user_id = request.cookies.get('user_id')
+    if not user_id:
+        return redirect('/login')
+    with db.cursor() as cursor:
+        cursor.execute("DELETE FROM notifications WHERE user_id = %s", (user_id,))
+    db.commit()
+    return redirect('/notifications')
+
+
 # History
 @app.route("/history")
 def history():
@@ -489,6 +809,14 @@ def scheduled_transactions():
 @app.route("/send_money")
 def send_money():
     return render_template("send_money.html")
+
+@app.route("/utility")
+def utility():
+    return render_template("utility.html")
+
+@app.route("/payment")
+def payment():
+    return render_template("payment.html")
 
 
 if __name__ == "__main__":

@@ -198,10 +198,7 @@
           <input type="checkbox" id="installmentOption" name="installmentOption" value="on" onclick="toggleOption('installment')">
           Pay in Installments
         </label><br>
-        <label>
-          <input type="checkbox" id="multipleSourceOption" name="multipleSourceOption" value="on" onclick="toggleOption('multiple')">
-          Pay in Multiple Source
-        </label>
+        
       </div>
 
 
@@ -218,32 +215,6 @@
         <div class="installment-info" id="installmentInfo"></div>
       </div>
 
-
-      <!-- Multiple Source -->
-      <div id="multipleSourceDetails" class="multiple-source-details" style="display:none;">
-        <label>Source Percentage Splits:</label>
-
-        <div class="slider-group">
-          <label>Mobile Banking: <span id="mobileValue">34%</span></label>
-          <input type="range" id="mobileSlider" name="mobileSlider" min="0" max="100" value="34" oninput="adjustSliders('mobile')">
-        </div>
-
-        <div class="slider-group">
-          <label>Bank Account: <span id="bankValue">33%</span></label>
-          <input type="range" id="bankSlider" min="0" max="100" value="33" oninput="adjustSliders('bank')">
-          <input type="number" id="bankAccount" name="bankAccount" placeholder="Bank Account No" min="0" step="1">
-          <div id="bankError" style="color: #ff6b6b; font-size: 12px; display: none;">Bank Account is required</div>
-
-        </div>
-
-        <div class="slider-group">
-          <label>Card: <span id="cardValue">33%</span></label>
-          <input type="range" id="cardSlider" min="0" max="100" value="33" oninput="adjustSliders('card')">
-          <input type="number" id="cardNumber" name="cardNumber" placeholder="Card Number" min="0" step="1">
-          <div id="cardError" style="color: #ff6b6b; font-size: 12px; display: none;">Card Number is required</div>
-
-        </div>
-      </div>
 
       <div class="button-group">
         <button type="submit">Pay</button>

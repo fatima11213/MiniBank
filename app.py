@@ -76,6 +76,92 @@ def logout():
 
 #Registration and Signin
 
+#admin_signup
+@app.route("/admin_signup", methods=["GET", "POST"])
+def admin_signup():
+    if request.method == "GET":
+        return render_template("admin_signup.html")
+
+    try:
+        firstName = request.form.get("firstName")
+        lastName = request.form.get("lastName")
+        dob = request.form.get("dob")
+        email = request.form.get("email")
+        phone = request.form.get("phone")
+        nid = request.form.get("nid")
+        password = request.form.get("password")
+        # Validation
+        if not password:
+            return render_template("admin_signup.html", error="Password is required.")
+
+        if len(phone) != 11 or not phone.startswith("01"):
+            return render_template("admin_signup.html", error="Enter a valid 11-digit phone number starting with '01'.")
+
+        try:
+            dob_date = datetime.strptime(dob, "%Y-%m-%d").date()
+
+        except ValueError:
+            return render_template("admin_signup.html", error="Invalid DOB format. Use YYYY-MM-DD.")
+
+        # Check if phone number already exists
+        with db.cursor() as cursor:
+            cursor.execute("SELECT * FROM admin_profile WHERE phone_number = %s", (phone,))
+            existing_user = cursor.fetchone()
+            if existing_user:
+                return render_template("admin_signup.html", phone_error="Phone number already in use")
+
+        hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode()
+        # Insert new admin
+        with db.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO admin_profile
+                (first_name, last_name, dob, email, phone_number, nid, password, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'unauthorized')
+            """, (firstName, lastName, dob_date, email, phone, nid, hashed_password))
+            db.commit()
+        return redirect("/admin_req_submitted")
+
+    except Exception as e:
+        traceback.print_exc()
+        return render_template("admin_signup.html", error=f"Signup error: {str(e)}")
+
+#admin login
+@app.route("/admin_login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "GET":
+        return render_template("admin_login.html")
+
+    phone = request.form.get("phone")
+    password = request.form.get("password")
+
+    print("Phone submitted:", phone)
+    print("Password submitted:", password)
+
+    if not phone or not password:
+        return render_template("admin_login.html", error="Please fill in all fields.")
+
+    with db.cursor() as cursor:
+        cursor.execute("SELECT * FROM admin_profile WHERE phone_number = %s", (phone,))
+        admin = cursor.fetchone()
+
+    print("Admin fetched from DB:", admin)
+
+    if not admin:
+        return render_template("admin_login.html", error="Admin not found.")
+
+    if not bcrypt.checkpw(password.encode("utf-8"), admin["password"].encode("utf-8")):
+        return render_template("admin_login.html", error="Invalid password.")
+
+    status = admin.get("status", "unauthorized")
+    if status == "unauthorized":
+        return render_template("admin_login.html", error="Request pending.")
+    elif status == "denied":
+        return render_template("admin_login.html", error="Request denied.")
+
+
+    resp = make_response(redirect("/admin_home"))
+    resp = set_secure_cookie(resp, admin["admin_id"])
+    return resp
 
 #user_signup
 @app.route("/signup", methods=["GET", "POST"])
@@ -254,7 +340,94 @@ def update_profile():
         flash(f'Error updating profile: {str(e)}', 'error')
         return redirect(url_for('edit_profile'))
 
-    
+#Add money
+#add money bank
+@app.route("/bank", methods=["GET", "POST"])
+def bank():
+    user_id = get_user_id_from_cookie()
+    if not user_id:
+        return render_template("login.html")
+    if request.method == "GET":
+        return render_template("bank.html")
+    account_no = request.form.get("accountNo")
+    amount = request.form.get("amount")
+    if not account_no or not amount:
+        return render_template("bank.html", error="Please fill in all fields.")
+    try:
+        amount = float(amount)
+        if amount <= 0:
+            raise ValueError("Amount must be positive")
+    except ValueError:
+        return render_template("bank.html", error="Invalid amount entered.")
+    try:
+        with db.cursor() as cursor:
+            trx_id = generate_unique_trx_id(cursor)
+            cursor.execute("""
+                INSERT INTO add_money_bank (user_id, acc_no, amount, trx_id)
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, account_no, amount, trx_id))
+            cursor.execute("""
+                UPDATE user_profile SET balance = balance + %s WHERE user_id = %s
+            """, (amount, user_id))
+            #notification
+            cursor.execute("""
+                INSERT INTO notifications (user_id, alerts)
+                VALUES (%s, %s)
+            """, (user_id, f"Add money from Bank account {account_no} for Taka {amount:.2f} successful, Trx ID: {trx_id}"))
+            cursor.execute("""
+                INSERT INTO history (user_id, type, trx_id, account, amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "Add Money from Bank", trx_id, account_no, amount))
+
+            db.commit()
+        return render_template("bank.html", success=True)
+    except Exception as e:
+        db.rollback()
+        return render_template("bank.html", error="Something went wrong. Please try again.")
+
+#add money card
+@app.route("/card", methods=["GET", "POST"])
+def card():
+    user_id = get_user_id_from_cookie()
+    if not user_id:
+        return render_template("login.html")
+    if request.method == "GET":
+        return render_template("card.html")
+    account_no = request.form.get("cardNo")
+    amount = request.form.get("amount")
+    if not account_no or not amount:
+        return render_template("card.html", error="Please fill in all fields.")
+    try:
+        amount = float(amount)
+        if amount <= 0:
+            raise ValueError("Amount must be positive")
+    except ValueError:
+        return render_template("card.html", error="Invalid amount entered.")
+    try:
+        with db.cursor() as cursor:
+            trx_id = generate_unique_trx_id(cursor)
+            cursor.execute("""
+                INSERT INTO add_money_card (user_id, card_no, amount, trx_id)
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, account_no, amount, trx_id))
+            cursor.execute("""
+                UPDATE user_profile SET balance = balance + %s WHERE user_id = %s
+            """, (amount, user_id))
+            #notification
+            cursor.execute("""
+                INSERT INTO notifications (user_id, alerts)
+                VALUES (%s, %s)
+            """, (user_id, f"Add money from card account {account_no} for Taka {amount:.2f} successful, Trx ID: {trx_id}"))
+            cursor.execute("""
+                INSERT INTO history (user_id, type, trx_id, account, amount)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, "Add Money from Card", trx_id, account_no, amount))
+
+            db.commit()
+        return render_template("card.html", success=True)
+    except Exception as e:
+        db.rollback()
+        return render_template("card.html", error="Something went wrong. Please try again.")    
 
 #send money
 #send_now
@@ -526,6 +699,9 @@ def gas_bill():
                 INSERT INTO history (user_id, type, trx_id, account, amount)
                 VALUES (%s, %s, %s, %s, %s)
             """, (user_id, "Gas Bill Payment", "N/A", meter_no, -amount))
+
+        db.commit()
+        return render_template("gas_bill.html", popup="success")
 #wifi bill
 @app.route("/wifi_bill", methods=["GET", "POST"])
 def wifi_bill():
@@ -605,6 +781,8 @@ def wifi_bill():
                 INSERT INTO history (user_id, type, trx_id, account, amount)
                 VALUES (%s, %s, %s, %s, %s)
             """, (user_id, "WiFi Bill Payment", "N/A", wifi_id, -amount))
+        db.commit()
+        return render_template("wifi_bill.html", popup="success")
     
 
 #electricity bill
@@ -688,6 +866,8 @@ def electricity_bill():
                 INSERT INTO history (user_id, type, trx_id, account, amount)
                 VALUES (%s, %s, %s, %s, %s)
             """, (user_id, "Electricity Bill Payment", "N/A", meter_no, -amount))
+        db.commit()
+        return render_template("electricity_bill.html", popup="success")
 
 
 #Pending Installment
@@ -781,6 +961,94 @@ def history():
 
     return render_template("history.html", history_records=history_records)
 
+#Admin
+#New Admin Approvals
+@app.route("/approvals", methods=["GET", "POST"])
+def approvals():
+    if request.method == "GET":
+        try:
+            with db.cursor() as cursor:
+                cursor.execute("""
+                    SELECT first_name, last_name, email, nid, dob, phone_number
+                    FROM admin_profile
+                    WHERE status = 'unauthorized'
+                    ORDER BY admin_id ASC
+                    LIMIT 10
+                """)
+                pending_admins = cursor.fetchall()
+        except Exception as e:
+            print("Error fetching approvals:", e)
+            pending_admins = []
+        return render_template("admin_approvals.html", pending_admins=pending_admins)
+
+    elif request.method == "POST":
+        try:
+            phones = request.form.getlist("phones")
+            actions = request.form.getlist("actions")
+
+            updates = list(zip(phones, actions))
+            with db.cursor() as cursor:
+                for phone, action in updates:
+                    if action == "Approve":
+                        cursor.execute("UPDATE admin_profile SET status = 'authorized' WHERE phone_number = %s", (phone,))
+                    elif action == "Deny":
+                        cursor.execute("UPDATE admin_profile SET status = 'denied' WHERE phone_number = %s", (phone,))
+            db.commit()
+            flash("Approvals updated successfully!", "success")
+        except Exception as e:
+            print("Error processing approvals:", e)
+            flash("Something went wrong. Try again.", "error")
+
+        return redirect("/approvals")
+
+
+
+# User Suspend
+@app.route('/user_suspend', methods=['GET', 'POST'])
+def user_suspend():
+    users = []
+    selected_user = None
+    search_query = ''
+
+    if request.method == 'POST':
+        print("POST request received")
+        form_data = request.form
+        print("Form data:", form_data)
+
+        search_query = form_data.get('search_query') or form_data.get('selected_phone')
+        print("Search Query:", search_query)
+
+        if search_query:
+            with db.cursor() as cursor:
+                query = """
+                    SELECT * FROM user_profile
+                    WHERE phone_number = %s
+                    OR first_name LIKE %s
+                    OR last_name LIKE %s
+                    OR nid = %s
+                """
+                cursor.execute(query, (search_query, f"%{search_query}%", f"%{search_query}%", search_query))
+                users = cursor.fetchall()
+
+                if users:
+                    selected_user = users[0]
+                    print("User found:", selected_user)
+
+                    suspend_key = f"status_{selected_user['phone_number']}"
+                    if suspend_key in form_data:
+                        new_status = form_data[suspend_key]
+                        if new_status:
+                            update_query = "UPDATE user_profile SET status = %s WHERE phone_number = %s"
+                            cursor.execute(update_query, (new_status, selected_user['phone_number']))
+                            db.commit()
+                            print(f"User {selected_user['phone_number']} status updated to {new_status}")
+
+                            cursor.execute("SELECT * FROM user_profile WHERE phone_number = %s", (selected_user['phone_number'],))
+                            updated_user = cursor.fetchone()
+                            if updated_user:
+                                selected_user = updated_user
+
+    return render_template('user_suspend.html', users=users, selected_user=selected_user, search_query=search_query)
 
 
 #routes
@@ -805,6 +1073,9 @@ def homepage():
 def scheduled_transactions():
     return render_template("scheduled_transactions.html")
 
+@app.route("/add_money")
+def add_money():
+    return render_template("add_money.html")
 
 @app.route("/send_money")
 def send_money():
@@ -817,6 +1088,16 @@ def utility():
 @app.route("/payment")
 def payment():
     return render_template("payment.html")
+
+
+@app.route("/admin_home")
+def admin_home():
+    return render_template("admin_home.html")
+
+
+@app.route("/admin_req_submitted")
+def admin_req_submitted():
+    return render_template("admin_req_submitted.html")
 
 
 if __name__ == "__main__":
